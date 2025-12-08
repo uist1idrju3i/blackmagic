@@ -100,7 +100,7 @@ static usbd_device *bmd_dwc2_init(void)
 	OTG_FS_GINTSTS = UINT32_MAX;
 	/*
 	 * Unmask interrupts for core events - SOF, RX FIFO non-empty, USB suspend, USB reset,
-	 * enumeration done, IN and OUT endpoint interrupts, amd wake-up detected
+	 * enumeration done, IN endpoint interrupts, amd wake-up detected
 	 */
 	OTG_FS_GINTMSK = OTG_GINTMSK_SOFM | OTG_GINTMSK_RXFLVLM | OTG_GINTMSK_USBSUSPM | OTG_GINTMSK_USBRST |
 		OTG_GINTMSK_ENUMDNEM | OTG_GINTMSK_IEPINT | OTG_GINTMSK_OEPINT | OTG_GINTMSK_WUIM;
@@ -274,6 +274,15 @@ static void bmd_dwc2_endpoints_reset(usbd_device *const device)
 	OTG_FS_GRSTCTL &= ~OTG_GRSTCTL_TXFNUM_MASK;
 }
 
+static void bmd_dwc2_flush_txfifo(const uint8_t endpoint)
+{
+	/* Flush the FIFO requested */
+	OTG_FS_GRSTCTL = (endpoint << 6U) | OTG_GRSTCTL_TXFFLSH;
+	/* Wait for that to complete */
+	while ((OTG_FS_GRSTCTL & OTG_GRSTCTL_TXFFLSH) != 0U)
+		continue;
+}
+
 static void bmd_dwc2_poll(usbd_device *const device)
 {
 	const uint32_t status = OTG_FS_GINTSTS;
@@ -292,5 +301,64 @@ static void bmd_dwc2_poll(usbd_device *const device)
 		/* There's nothing much to do here, this interrupt just indicates that the link speed is now set */
 		OTG_FS_GINTSTS = OTG_GINTSTS_ENUMDNE;
 		return;
+	}
+
+	/* Handle notifications for IN transactions complete */
+	if (status & OTG_GINTSTS_IEPINT) {
+		for (size_t ep = 0U; ep < ENDPOINT_COUNT; ++ep) {
+			/* If this endpoint has a completion, process it */
+			if (OTG_FS_DIEPINT(ep) & OTG_DIEPINTX_XFRC) {
+				/* Call any callback that might be available */
+				if (device->user_callback_ctr[ep][USB_TRANSACTION_IN])
+					device->user_callback_ctr[ep][USB_TRANSACTION_IN](device, ep);
+				/* Clear the interrupt notification */
+				OTG_FS_DIEPINT(ep) = OTG_DIEPINTX_XFRC;
+			}
+		}
+	}
+
+	/* Handle OUT packet reception */
+	while (OTG_FS_GINTSTS & OTG_GINTSTS_RXFLVL) {
+		/* Pop the RX packet status from the stack and decode */
+		const uint32_t rx_status = OTG_FS_GRXSTSP;
+		const uint32_t phase = rx_status & OTG_GRXSTSP_PKTSTS_MASK;
+		const uint8_t ep = rx_status & OTG_GRXSTSP_EPNUM_MASK;
+		device->rxbcnt = (rx_status & OTG_GRXSTSP_BCNT_MASK) >> 4U;
+
+		switch (phase) {
+		case OTG_GRXSTSP_PKTSTS_SETUP_COMP:
+			/* Packet is for completion of a SETUP transaction, call the callback for this */
+			device->user_callback_ctr[ep][USB_TRANSACTION_SETUP](device, ep);
+			/* Mark it handled for this endpoint */
+			OTG_FS_DOEPINT(ep) = OTG_DOEPINTX_STUP;
+			break;
+		case OTG_GRXSTSP_PKTSTS_SETUP:
+			/* Packet is a SETUP packet, check if there's anything stuck in the TX FIFO to flush */
+			if ((OTG_FS_DIEPTSIZ(ep) & OTG_DIEPSIZ0_PKTCNT) != 0U)
+				bmd_dwc2_flush_txfifo(ep);
+			/* Having made sure we're in a sensible state, now dequeue the data */
+			bmd_dwc2_read_packet(device, ep, &device->control_state.req, sizeof(device->control_state.req));
+			break;
+		case OTG_GRXSTSP_PKTSTS_OUT:
+			/* Call the user's handler if present */
+			if (device->user_callback_ctr[ep][USB_TRANSACTION_OUT])
+				device->user_callback_ctr[ep][USB_TRANSACTION_OUT](device, ep);
+			break;
+		default:
+			break;
+		}
+
+		/* Discard any straggling data for this packet that wasn't yet handled */
+		for (size_t offset = 0; offset < device->rxbcnt; offset += 4U) {
+			/* There is only one receive FIFO, so use OTG_FS_FIFO(0) */
+			(void)OTG_FS_FIFO(0U);
+		}
+		device->rxbcnt = 0U;
+
+		/* If this is for a completion, re-arm the endpoint, preserving ACK state */
+		if (phase == OTG_GRXSTSP_PKTSTS_SETUP_COMP || phase == OTG_GRXSTSP_PKTSTS_OUT_COMP) {
+			OTG_FS_DOEPTSIZ(ep) = device->doeptsiz[ep];
+			OTG_FS_DOEPCTL(ep) |= OTG_DOEPCTL0_EPENA | (device->force_nak[ep] ? OTG_DOEPCTL0_SNAK : OTG_DOEPCTL0_CNAK);
+		}
 	}
 }
