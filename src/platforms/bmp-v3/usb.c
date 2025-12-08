@@ -361,4 +361,23 @@ static void bmd_dwc2_poll(usbd_device *const device)
 			OTG_FS_DOEPCTL(ep) |= OTG_DOEPCTL0_EPENA | (device->force_nak[ep] ? OTG_DOEPCTL0_SNAK : OTG_DOEPCTL0_CNAK);
 		}
 	}
+
+	/* Process suspend and wakeup interrupts */
+	if (status & OTG_GINTSTS_USBSUSP) {
+		if (device->user_callback_suspend)
+			device->user_callback_suspend();
+		OTG_FS_GINTSTS = OTG_GINTSTS_USBSUSP;
+	}
+	if (status & OTG_GINTSTS_WKUPINT) {
+		if (device->user_callback_resume)
+			device->user_callback_resume();
+		OTG_FS_GINTSTS = OTG_GINTSTS_WKUPINT;
+	}
+
+	/* Handle SOF notifications */
+	if (status & OTG_GINTSTS_SOF) {
+		if (device->user_callback_sof)
+			device->user_callback_sof();
+		OTG_FS_GINTSTS = OTG_GINTSTS_SOF;
+	}
 }
