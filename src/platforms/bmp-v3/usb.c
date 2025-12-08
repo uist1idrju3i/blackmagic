@@ -62,6 +62,7 @@ static void bmd_dwc2_nak_set(usbd_device *device, uint8_t endpoint_address, uint
 static void bmd_dwc2_setup(usbd_device *device, uint8_t endpoint_address, uint8_t type, uint16_t max_packet_length,
 	void (*callback)(usbd_device *usbd_dev, uint8_t ep));
 static void bmd_dwc2_endpoints_reset(usbd_device *device);
+static void bmd_dwc2_flush_txfifo(const uint8_t endpoint);
 static void bmd_dwc2_poll(usbd_device *device);
 
 static usbd_device usbd_dev;
@@ -178,8 +179,17 @@ static uint16_t bmd_dwc2_write_packet(
 	(void)device;
 	const uint8_t ep = endpoint_address & 0x7fU;
 	/* Spin if endpoint is already enabled. */
-	while (OTG_FS_DIEPCTL(ep) & OTG_DIEPCTL0_EPENA)
+	while ((OTG_FS_DIEPCTL(ep) & (OTG_DIEPCTL0_EPENA | OTG_DIEPCTL0_NAKSTS)) == OTG_DIEPCTL0_EPENA)
 		continue;
+	/* If it's still enabled but being NAK'd, flush FIFO and reset */
+	if ((OTG_FS_DIEPCTL(ep) & OTG_DIEPCTL0_EPENA) != 0U) {
+		bmd_dwc2_flush_txfifo(ep);
+		/* Disable the endpoint and wait for it to become actually disabled */
+		OTG_FS_DIEPCTL(ep) |= OTG_DIEPCTL0_EPDIS;
+		while ((OTG_FS_DIEPINT(ep) & OTG_DIEPINTX_EPDISD) == 0U)
+			continue;
+		OTG_FS_DIEPINT(ep) = OTG_DIEPINTX_EPDISD;
+	}
 
 	/* Configure the endpoint to accept the new packet */
 	if (ep == 0U)
