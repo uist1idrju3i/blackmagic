@@ -55,9 +55,9 @@ void bmd_dwc2_disconnect(usbd_device *device, bool disconnect);
 static void bmd_dwc2_set_address(usbd_device *device, uint8_t address);
 static uint16_t bmd_dwc2_read_packet(usbd_device *device, uint8_t endpoint, void *buffer, uint16_t length);
 static uint16_t bmd_dwc2_write_packet(usbd_device *device, uint8_t endpoint, const void *buffer, uint16_t length);
-static void bmd_dwc2_stall_set(usbd_device *device, uint8_t endpoint, uint8_t stall);
-static uint8_t bmd_dwc2_stall_get(usbd_device *device, uint8_t endpoint);
-static void bmd_dwc2_nak_set(usbd_device *device, uint8_t endpoint, uint8_t nak);
+static void bmd_dwc2_stall_set(usbd_device *device, uint8_t endpoint_address, uint8_t stall);
+static uint8_t bmd_dwc2_stall_get(usbd_device *device, uint8_t endpoint_address);
+static void bmd_dwc2_nak_set(usbd_device *device, uint8_t endpoint_address, uint8_t nak);
 static void bmd_dwc2_setup(usbd_device *device, uint8_t endpoint_address, uint8_t type, uint16_t max_packet_length,
 	void (*callback)(usbd_device *usbd_dev, uint8_t ep));
 static void bmd_dwc2_endpoints_reset(usbd_device *device);
@@ -174,16 +174,55 @@ static uint16_t bmd_dwc2_write_packet(
 	return 0U;
 }
 
-static void bmd_dwc2_stall_set(usbd_device *const device, const uint8_t endpoint, const uint8_t stall)
+static void bmd_dwc2_stall_set(usbd_device *const device, const uint8_t endpoint_address, const uint8_t stall)
 {
+	(void)device;
+	/* Decode which endpoint this request is for exactly */
+	const uint8_t ep = endpoint_address & 0x7fU;
+	const uint8_t dir = endpoint_address & 0x80U;
+	/* If the stall is for EP0, special-case to handle this correctly */
+	if (ep == 0U) {
+		/* Set/clear STALL on the IN side to properly communicate the condition back to the host */
+		if (stall)
+			OTG_FS_DIEPCTL(0U) |= OTG_DIEPCTL0_STALL;
+		else
+			OTG_FS_DIEPCTL(0U) &= ~OTG_DIEPCTL0_STALL;
+	} else {
+		/* Figure out which direction to set STALL for */
+		if (dir == 0U) {
+			/* Set/clear STALL on OUT endpoint */
+			if (stall)
+				OTG_FS_DOEPCTL(ep) |= OTG_DOEPCTL0_STALL;
+			else
+				OTG_FS_DOEPCTL(ep) &= ~OTG_DOEPCTL0_STALL;
+			/* Reset DATA PID to use */
+			OTG_FS_DOEPCTL(ep) |= OTG_DOEPCTLX_SD0PID;
+		} else {
+			/* Set/clear STALL on IN endpoint */
+			if (stall)
+				OTG_FS_DIEPCTL(ep) |= OTG_DIEPCTL0_STALL;
+			else
+				OTG_FS_DIEPCTL(ep) &= ~OTG_DIEPCTL0_STALL;
+			/* Reset DATA PID to use */
+			OTG_FS_DIEPCTL(ep) |= OTG_DIEPCTLX_SD0PID;
+		}
+	}
 }
 
-static uint8_t bmd_dwc2_stall_get(usbd_device *const device, const uint8_t endpoint)
+static uint8_t bmd_dwc2_stall_get(usbd_device *const device, const uint8_t endpoint_address)
 {
-	return true;
+	(void)device;
+	/* Decode which endpoint this request is for exactly */
+	const uint8_t ep = endpoint_address & 0x7fU;
+	const uint8_t dir = endpoint_address & 0x80U;
+	/* Handle OUT endpoints */
+	if (dir == 0U)
+		return (OTG_FS_DOEPCTL(ep) & OTG_DOEPCTL0_STALL) ? true : false;
+	/* Handle IN endpoints */
+	return (OTG_FS_DIEPCTL(ep) & OTG_DIEPCTL0_STALL) ? true : false;
 }
 
-static void bmd_dwc2_nak_set(usbd_device *const device, const uint8_t endpoint, const uint8_t nak)
+static void bmd_dwc2_nak_set(usbd_device *const device, const uint8_t endpoint_address, const uint8_t nak)
 {
 }
 
