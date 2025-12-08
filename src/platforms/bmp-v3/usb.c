@@ -53,8 +53,9 @@
 static usbd_device *bmd_dwc2_init(void);
 void bmd_dwc2_disconnect(usbd_device *device, bool disconnect);
 static void bmd_dwc2_set_address(usbd_device *device, uint8_t address);
-static uint16_t bmd_dwc2_read_packet(usbd_device *device, uint8_t endpoint, void *buffer, uint16_t length);
-static uint16_t bmd_dwc2_write_packet(usbd_device *device, uint8_t endpoint, const void *buffer, uint16_t length);
+static uint16_t bmd_dwc2_read_packet(usbd_device *device, uint8_t endpoint_address, void *buffer, uint16_t length);
+static uint16_t bmd_dwc2_write_packet(
+	usbd_device *device, uint8_t endpoint_address, const void *buffer, uint16_t length);
 static void bmd_dwc2_stall_set(usbd_device *device, uint8_t endpoint_address, uint8_t stall);
 static uint8_t bmd_dwc2_stall_get(usbd_device *device, uint8_t endpoint_address);
 static void bmd_dwc2_nak_set(usbd_device *device, uint8_t endpoint_address, uint8_t nak);
@@ -94,6 +95,9 @@ static usbd_device *bmd_dwc2_init(void)
 
 	/* Set the TX FIFO interrupt to work on empty, and disable global interrupts for the moment */
 	OTG_FS_GAHBCFG = OTG_GAHBCFG_TXFELVL;
+	/* Enable VBUS sensing in device mode, and power up the FS PHY */
+	OTG_FS_GCCFG &= ~(OTG_GCCFG_PDEN | OTG_GCCFG_SDEN | OTG_GCCFG_DCDEN | OTG_GCCFG_BCDEN);
+	OTG_FS_GCCFG |= OTG_GCCFG_VBDEN | OTG_GCCFG_PWRDWN;
 	/* Set up for USB operation on a 160MHz AHB, don't enable HNP, or SRP and force device mode */
 	OTG_FS_GUSBCFG = OTG_GUSBCFG_FDMOD | (6U << 10U);
 	/* Clear all outstanding interrupts so we're in a clean state */
@@ -139,10 +143,10 @@ static void bmd_dwc2_set_address(usbd_device *const device, const uint8_t addres
 }
 
 static uint16_t bmd_dwc2_read_packet(
-	usbd_device *const device, const uint8_t endpoint, void *const buffer, const uint16_t length)
+	usbd_device *const device, const uint8_t endpoint_address, void *const buffer, const uint16_t length)
 {
 	/* We do not need to know the endpoint address since there is only one receive FIFO for all endpoints. */
-	(void)endpoint;
+	(void)endpoint_address;
 	/* Figure out how many bytes to read, and how many can be read as u32 chunks */
 	const size_t count = MIN(length, device->rxbcnt);
 	const size_t aligned_count = count & ~3U;
@@ -169,9 +173,37 @@ static uint16_t bmd_dwc2_read_packet(
 }
 
 static uint16_t bmd_dwc2_write_packet(
-	usbd_device *const device, const uint8_t endpoint, const void *const buffer, const uint16_t length)
+	usbd_device *const device, const uint8_t endpoint_address, const void *const buffer, const uint16_t length)
 {
-	return 0U;
+	(void)device;
+	const uint8_t ep = endpoint_address & 0x7fU;
+	/* Spin if endpoint is already enabled. */
+	while (OTG_FS_DIEPCTL(ep) & OTG_DIEPCTL0_EPENA)
+		continue;
+
+	/* Configure the endpoint to accept the new packet */
+	if (ep == 0U)
+		OTG_FS_DIEPTSIZ0 = OTG_DIEPSIZ0_PKTCNT | (length & OTG_DIEPSIZ0_XFRSIZ_MASK);
+	else
+		OTG_FS_DIEPTSIZ(ep) = OTG_DIEPSIZX_MCNT_1 | OTG_DIEPSIZX_PKTCNT(1) | (length & OTG_DIEPSIZX_XFRSIZ_MASK);
+	/* Arm the endpoint for send */
+	OTG_FS_DIEPCTL(ep) |= OTG_DIEPCTL0_EPENA | OTG_DIEPCTL0_CNAK;
+
+	/* Figure out how many bytes can be written as u32 chunks */
+	const size_t aligned_length = length & ~3U;
+	/* Copy what we can into the FIFO for this endpoint in u32 blocks */
+	for (size_t offset = 0U; offset < aligned_length; offset += 4U)
+		OTG_FS_FIFO(ep) = ((const uint32_t *)buffer)[offset >> 2U];
+	/* If there's some data left over at the end, do the final copy */
+	if (length - aligned_length) {
+		/* Prepare the data block for the FIFO */
+		uint32_t data = 0U;
+		memcpy(&data, (const uint8_t *)buffer + aligned_length, length - aligned_length);
+		/* Push the prepared data into the FIFO to complete transfer setup */
+		OTG_FS_FIFO(ep) = data;
+	}
+	/* Return that we wrote the whole packet out */
+	return length;
 }
 
 static void bmd_dwc2_stall_set(usbd_device *const device, const uint8_t endpoint_address, const uint8_t stall)
