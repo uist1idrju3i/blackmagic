@@ -91,7 +91,7 @@ int main(void)
 	gpio_set_output_options(LED3_PORT, GPIO_OTYPE_PP, GPIO_OSPEED_2MHZ, LED3_PIN);
 	gpio_mode_setup(LED3_PORT, GPIO_MODE_OUTPUT, GPIO_PUPD_NONE, LED3_PIN);
 
-	dfu_init(&otgfs_usb_driver);
+	dfu_init(&bmd_dwc2_usb_driver);
 
 	dfu_main();
 }
