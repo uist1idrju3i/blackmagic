@@ -40,12 +40,15 @@
 #include "timing.h"
 #include "timing_stm32.h"
 
+#include <libopencm3/usb/usbd.h>
+
 #define PLATFORM_HAS_TRACESWO
 #define PLATFORM_MULTI_UART
 
 #define PLATFORM_IDENT "v3 "
 
 extern int hwversion;
+extern const usbd_driver bmd_dwc2_usb_driver;
 
 /*
  * Important pin mappings for BMPv3:
@@ -198,7 +201,7 @@ extern int hwversion;
 		gpio_mode_setup(AUX_UART2_PORT, GPIO_MODE_AF, GPIO_PUPD_PULLUP, AUX_UART2_RX_PIN); \
 	} while (0)
 
-#define USB_DRIVER otgfs_usb_driver
+#define USB_DRIVER bmd_dwc2_usb_driver
 #define USB_IRQ    NVIC_USB_IRQ
 #define USB_ISR(x) usb_isr(x)
 /*

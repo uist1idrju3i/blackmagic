@@ -30,9 +30,15 @@
 
 probe_bmp_includes = include_directories('.')
 
-probe_bmp_sources = files('platform.c')
+probe_bmp_sources = files(
+	'platform.c',
+	'usb.c'
+)
 
-probe_bmp_dfu_sources = files('bootloader.c')
+probe_bmp_dfu_sources = files(
+	'bootloader.c',
+	'usb.c'
+)
 
 probe_bmp_args = [
 	'-DDFU_SERIAL_LENGTH=9',
