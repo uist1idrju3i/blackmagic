@@ -266,6 +266,21 @@ static uint8_t bmd_dwc2_stall_get(usbd_device *const device, const uint8_t endpo
 
 static void bmd_dwc2_nak_set(usbd_device *const device, const uint8_t endpoint_address, const uint8_t nak)
 {
+	/* Decode which endpoint this request is for exactly */
+	const uint8_t ep = endpoint_address & 0x7fU;
+	const uint8_t dir = endpoint_address & 0x80U;
+	/* Handle NAK's only on OUT endpoints */
+	if (dir != 0U)
+		return;
+	/*
+	 * Copy the required NAK state into the device state storage and then set
+	 * the NAK bit for this endpoint accordingly via SNAK/CNAK
+	 */
+	device->force_nak[ep] = nak;
+	if (nak)
+		OTG_FS_DOEPCTL(ep) |= OTG_DOEPCTL0_SNAK;
+	else
+		OTG_FS_DOEPCTL(ep) |= OTG_DOEPCTL0_CNAK;
 }
 
 static void bmd_dwc2_setup(usbd_device *const device, const uint8_t endpoint_address, const uint8_t type,
