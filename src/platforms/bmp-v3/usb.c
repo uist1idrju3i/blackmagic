@@ -43,8 +43,13 @@
 
 #undef OTG_FS_FIFO
 
-/* Receive FIFO size in 32-bit words. */
-#define RX_FIFO_SIZE 32U /* 128 bytes */
+/*
+ * Receive FIFO size in 32-bit words.
+ * We reserve first 4*n + 6 u32's for SETUP packets, where n is the number of endpoints total (6).
+ * Next, we reserve our max packet size (64) / 4 + 1 for general packet storage, and an additional
+ * one slot for the completion notification. This gives (4 * 6) + (64 / 4) + 8 = 24 + 16 + 8 = 48
+ */
+#define RX_FIFO_SIZE 48U /* 192 bytes */
 /* FIFO access is made through pointers derived by this */
 #define OTG_FS_FIFO(x) MMIO32(USB_OTG_FS_BASE + (0x1000U * (x + 1U)))
 
@@ -312,7 +317,7 @@ static void bmd_dwc2_setup(usbd_device *const device, const uint8_t endpoint_add
 
 		/* Now configure EP0 OUT to allow us to receive SETUP packets */
 		device->doeptsiz[0U] =
-			OTG_DOEPSIZ0_STUPCNT_3 | OTG_DOEPSIZ0_PKTCNT | (max_packet_length & OTG_DOEPSIZ0_XFRSIZ_MASK);
+			OTG_DOEPSIZ0_STUPCNT_1 | OTG_DOEPSIZ0_PKTCNT | (max_packet_length & OTG_DOEPSIZ0_XFRSIZ_MASK);
 		OTG_FS_DOEPTSIZ0 = device->doeptsiz[0U];
 		/* Arm the endpoint to recieve packets */
 		OTG_FS_DOEPCTL0 = OTG_DOEPCTL0_EPENA | OTG_DOEPCTL0_SNAK;
@@ -372,6 +377,10 @@ static void bmd_dwc2_endpoints_reset(usbd_device *const device)
 
 static void bmd_dwc2_flush_txfifo(const uint8_t endpoint)
 {
+	/* Mark the endpoint to NAK */
+	OTG_FS_DIEPCTL(endpoint) |= OTG_DIEPCTL0_SNAK;
+	while ((OTG_FS_DIEPINT(endpoint) & OTG_DIEPINTX_INEPNE) == 0)
+		continue;
 	/* Flush the FIFO requested */
 	OTG_FS_GRSTCTL = (endpoint << 6U) | OTG_GRSTCTL_TXFFLSH;
 	/* Wait for that to complete */
@@ -455,7 +464,8 @@ static void bmd_dwc2_poll(usbd_device *const device)
 		if (phase == OTG_GRXSTSP_PKTSTS_SETUP_COMP || phase == OTG_GRXSTSP_PKTSTS_OUT_COMP) {
 			OTG_FS_DOEPTSIZ(ep) = device->doeptsiz[ep];
 			OTG_FS_DOEPCTL(ep) |= OTG_DOEPCTL0_EPENA | (device->force_nak[ep] ? OTG_DOEPCTL0_SNAK : OTG_DOEPCTL0_CNAK);
-		}
+		} else
+			OTG_FS_DOEPINT(ep) = OTG_DOEPINTX_XFRC;
 	}
 
 	/* Process suspend and wakeup interrupts */
