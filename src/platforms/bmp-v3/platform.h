@@ -270,6 +270,6 @@ extern const usbd_driver bmd_dwc2_usb_driver;
 
 #define SET_RUN_STATE(state)   running_status = (state)
 #define SET_IDLE_STATE(state)  gpio_set_val(LED_IDLE_RUN_PORT, LED_IDLE_RUN_PIN, state)
-#define SET_ERROR_STATE(state) gpio_set_val(LED_ERROR_PORT, LED_ERROR_PIN, state)
+#define SET_ERROR_STATE(state) gpio_set_val(LED_ERROR_PORT, LED_ERROR_PIN, !state)
 
 #endif /* PLATFORMS_BMP_V3_PLATFORM_H */
