@@ -1,7 +1,7 @@
 /*
  * This file is part of the Black Magic Debug project.
  *
- * Copyright (C) 2022 1BitSquared <info@1bitsquared.com>
+ * Copyright (C) 2022-2025 1BitSquared <info@1bitsquared.com>
  * Written by Rachel Mant <git@dragonmux.network>
  *
  * This program is free software: you can redistribute it and/or modify
@@ -21,10 +21,15 @@
 #include <libopencm3/usb/usbd.h>
 #include <libopencm3/usb/dfu.h>
 #include <libopencm3/cm3/scb.h>
+#include <libopencm3/cm3/assert.h>
 
 #include "general.h"
 #include "usb_dfu_stub.h"
 #include "usb_types.h"
+
+#ifdef STM32U5
+#define BOOT_ADDRESS 0x08000000U
+#endif
 
 static void dfu_detach_complete(usbd_device *const dev, usb_setup_data_s *const req)
 {
@@ -35,6 +40,19 @@ static void dfu_detach_complete(usbd_device *const dev, usb_setup_data_s *const 
 	/* Reset core to enter bootloader */
 #if defined(__ARM_ARCH_7M__) || defined(__ARM_ARCH_7EM__)
 	scb_reset_core();
+#elif defined(__ARM_ARCH_8M_MAIN__)
+#if defined(STM32U5)
+	/* Reload PC and SP with their POR values from the start of Flash */
+	const uint32_t stack_pointer = *((uint32_t *)BOOT_ADDRESS);
+	/* clang-format off */
+	__asm__(
+		"msr msp, %1\n"     /* Load the system stack register with the new stack pointer */
+		"ldr pc, [%0, 4]\n" /* Jump to the bootloader */
+		: : "l"(BOOT_ADDRESS), "l"(stack_pointer) : "r0"
+	);
+	/* clang-format on */
+	cm3_assert_not_reached();
+#endif
 #endif
 }
 
