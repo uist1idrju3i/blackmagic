@@ -413,6 +413,8 @@ static void bmd_dwc2_poll(usbd_device *const device)
 		for (size_t ep = 0U; ep < ENDPOINT_COUNT; ++ep) {
 			/* If this endpoint has a completion, process it */
 			if (OTG_FS_DIEPINT(ep) & OTG_DIEPINTX_XFRC) {
+				/* Mark the endpoint for NAK so we don't cause a protocol error */
+				OTG_FS_DIEPCTL(ep) |= OTG_DIEPCTL0_SNAK;
 				/* Call any callback that might be available */
 				if (device->user_callback_ctr[ep][USB_TRANSACTION_IN])
 					device->user_callback_ctr[ep][USB_TRANSACTION_IN](device, ep);
