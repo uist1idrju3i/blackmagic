@@ -390,7 +390,7 @@ static void bmd_dwc2_flush_txfifo(const uint8_t endpoint)
 
 static void bmd_dwc2_poll(usbd_device *const device)
 {
-	const uint32_t status = OTG_FS_GINTSTS;
+	const uint32_t status = OTG_FS_GINTSTS & OTG_FS_GINTMSK;
 	/* First check to see if we're here for a USB reset event */
 	if (status & OTG_GINTSTS_USBRST) {
 		/* Do an endpoint reset, make sure EP0 is set up, and clear the condition */
@@ -421,6 +421,8 @@ static void bmd_dwc2_poll(usbd_device *const device)
 				/* Clear the interrupt notification */
 				OTG_FS_DIEPINT(ep) = OTG_DIEPINTX_XFRC;
 			}
+			/* Clear any and all interrupt notifications on this endpoint */
+			OTG_FS_DIEPINT(ep) = OTG_FS_DIEPINT(ep);
 		}
 	}
 
@@ -468,6 +470,25 @@ static void bmd_dwc2_poll(usbd_device *const device)
 			OTG_FS_DOEPCTL(ep) |= OTG_DOEPCTL0_EPENA | (device->force_nak[ep] ? OTG_DOEPCTL0_SNAK : OTG_DOEPCTL0_CNAK);
 		} else
 			OTG_FS_DOEPINT(ep) = OTG_DOEPINTX_XFRC;
+	}
+
+	/* Deal with any endpoint interrupts that are outstanding */
+	const uint32_t endpoints_status = OTG_FS_DAINT & OTG_FS_DAINTMSK;
+	/* Handle the OUT endpoints */
+	if (status & OTG_GINTSTS_OEPINT) {
+		uint16_t endpoints_mask = (uint16_t)(endpoints_status >> 16U);
+		uint8_t ep = 0U;
+		while (endpoints_mask != 0U) {
+			/* If there's an interrupt set on this endpoint */
+			if (endpoints_mask & 1U) {
+				/* Clear it */
+				OTG_FS_DOEPINT(ep) = OTG_FS_DOEPINT(ep);
+			}
+
+			/* Advance to the next endpoint */
+			endpoints_mask >>= 1U;
+			++ep;
+		}
 	}
 
 	/* Process suspend and wakeup interrupts */
