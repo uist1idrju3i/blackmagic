@@ -418,8 +418,6 @@ static void bmd_dwc2_poll(usbd_device *const device)
 				/* Call any callback that might be available */
 				if (device->user_callback_ctr[ep][USB_TRANSACTION_IN])
 					device->user_callback_ctr[ep][USB_TRANSACTION_IN](device, ep);
-				/* Clear the interrupt notification */
-				OTG_FS_DIEPINT(ep) = OTG_DIEPINTX_XFRC;
 			}
 			/* Clear any and all interrupt notifications on this endpoint */
 			OTG_FS_DIEPINT(ep) = OTG_FS_DIEPINT(ep);
@@ -438,8 +436,6 @@ static void bmd_dwc2_poll(usbd_device *const device)
 		case OTG_GRXSTSP_PKTSTS_SETUP_COMP:
 			/* Packet is for completion of a SETUP transaction, call the callback for this */
 			device->user_callback_ctr[ep][USB_TRANSACTION_SETUP](device, ep);
-			/* Mark it handled for this endpoint */
-			OTG_FS_DOEPINT(ep) = OTG_DOEPINTX_STUP;
 			break;
 		case OTG_GRXSTSP_PKTSTS_SETUP:
 			/* Packet is a SETUP packet, check if there's anything stuck in the TX FIFO to flush */
@@ -468,8 +464,7 @@ static void bmd_dwc2_poll(usbd_device *const device)
 		if (phase == OTG_GRXSTSP_PKTSTS_SETUP_COMP || phase == OTG_GRXSTSP_PKTSTS_OUT_COMP) {
 			OTG_FS_DOEPTSIZ(ep) = device->doeptsiz[ep];
 			OTG_FS_DOEPCTL(ep) |= OTG_DOEPCTL0_EPENA | (device->force_nak[ep] ? OTG_DOEPCTL0_SNAK : OTG_DOEPCTL0_CNAK);
-		} else
-			OTG_FS_DOEPINT(ep) = OTG_DOEPINTX_XFRC;
+		}
 	}
 
 	/* Deal with any endpoint interrupts that are outstanding */
