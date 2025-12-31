@@ -314,6 +314,7 @@ static void bmd_dwc2_setup(usbd_device *const device, const uint8_t endpoint_add
 			OTG_FS_DIEPCTL0 = OTG_DIEPCTL0_MPSIZ_16;
 		else
 			OTG_FS_DIEPCTL0 = OTG_DIEPCTL0_MPSIZ_8;
+		OTG_FS_DIEPCTL0 |= OTG_DIEPCTL0_SNAK;
 
 		/* Now configure EP0 OUT to allow us to receive SETUP packets */
 		device->doeptsiz[0U] =
@@ -359,11 +360,10 @@ static void bmd_dwc2_endpoints_reset(usbd_device *const device)
 	 * NB: We ignore EP0 here because that's handled by the EP setup call _usbd_reset() performs.
 	 */
 	for (size_t i = 1U; i < ENDPOINT_COUNT; ++i) {
-		OTG_FS_DOEPCTL(i) = OTG_DOEPCTL0_SNAK;
 		if (OTG_FS_DOEPCTL(i) & OTG_DOEPCTL0_EPENA)
-			OTG_FS_DOEPCTL(i) |= OTG_DOEPCTL0_EPDIS;
+			OTG_FS_DOEPCTL(i) |= OTG_DOEPCTL0_SNAK | OTG_DOEPCTL0_EPDIS;
 		if (OTG_FS_DIEPCTL(i) & OTG_DIEPCTL0_EPENA)
-			OTG_FS_DIEPCTL(i) |= OTG_DIEPCTL0_EPDIS;
+			OTG_FS_DIEPCTL(i) |= OTG_DIEPCTL0_SNAK | OTG_DIEPCTL0_EPDIS;
 	}
 
 	/* Make sure all FIFOs are fully flushed */
@@ -373,6 +373,12 @@ static void bmd_dwc2_endpoints_reset(usbd_device *const device)
 		continue;
 	/* Reset the GRSTCTL register state */
 	OTG_FS_GRSTCTL &= ~OTG_GRSTCTL_TXFNUM_MASK;
+
+	/* Reset the endpoint disabled interrupt state for all endpoints */
+	for (size_t i = 1U; i < ENDPOINT_COUNT; ++i) {
+		OTG_FS_DOEPINT(i) = OTG_DOEPINTX_EPDISD;
+		OTG_FS_DIEPINT(i) = OTG_DIEPINTX_EPDISD;
+	}
 }
 
 static void bmd_dwc2_flush_txfifo(const uint8_t endpoint)
